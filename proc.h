@@ -63,10 +63,34 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int is_traced;
+  int syscall_count;
+  int context_switch_count;
+  int ticket_count;
+  int scheduled_count;
 };
+
 
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+struct processes_info {
+    int num_processes;
+    int pids[NPROC];       
+    int ticks[NPROC];       // ticks = number of times process has been scheduled
+    int tickets[NPROC];     // tickets = number of tickets set by settickets()
+};
+
+void count_processes(struct processes_info *pi);
+struct proc * getProcByPid(int pid);
+
+#ifndef DEF_YIELD
+#define DEF_YIELD
+void yield(void);
+#endif
+
+
+

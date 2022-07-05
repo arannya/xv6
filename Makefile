@@ -1,4 +1,5 @@
 OBJS = \
+        arith64.o\
 	bio.o\
 	console.o\
 	exec.o\
@@ -75,7 +76,7 @@ AS = $(TOOLPREFIX)gas
 LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
-CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -ggdb -m32 -Werror -fno-omit-frame-pointer
+CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -ggdb -m32 -Werror -fno-omit-frame-pointer 
 #CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -fvar-tracking -fvar-tracking-assignments -O0 -g -Wall -MD -gdwarf-2 -m32 -Werror -fno-omit-frame-pointer
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 ASFLAGS = -m32 -gdwarf-2 -Wa,-divide
@@ -148,6 +149,10 @@ _forktest: forktest.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _forktest forktest.o ulib.o usys.o
 	$(OBJDUMP) -S _forktest > forktest.asm
 
+_uthread: uthread.o uthread_switch.o
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _uthread uthread.o uthread_switch.o $(ULIB)
+	$(OBJDUMP) -S _uthread > uthread.asm
+
 mkfs: mkfs.c fs.h
 	gcc -Werror -Wall -o mkfs mkfs.c
 
@@ -158,19 +163,28 @@ mkfs: mkfs.c fs.h
 .PRECIOUS: %.o
 
 UPROGS=\
+	_alloc_small_dump\
 	_cat\
+	_dumppt\
 	_echo\
 	_forktest\
 	_grep\
 	_init\
 	_kill\
 	_ln\
+	_lotterytest\
 	_ls\
 	_mkdir\
+	_rand_test\
 	_rm\
 	_sh\
 	_stressfs\
+	_processlist\
+	_timewithtickets\
+	_try\
+	_try_csinfo\
 	_usertests\
+	_uthread\
 	_wc\
 	_zombie\
 
@@ -240,8 +254,8 @@ qemu-nox-gdb: fs.img xv6.img .gdbinit
 # check in that version.
 
 EXTRA=\
-	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c kill.c\
-	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
+	mkfs.c ulib.c user.h alloc_small_dump.c cat.c dumppt.c echo.c forktest.c grep.c kill.c\
+	ln.c lotterytest.c ls.c mkdir.c processlist.c rand_test.c rm.c stressfs.c timewithtickets.c try.c try_csinfo.c usertests.c uthread.c wc.c zombie.c\
 	printf.c umalloc.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\
 	.gdbinit.tmpl gdbutil\

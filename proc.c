@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#define PHI 0x9e3779
 
 struct {
   struct spinlock lock;
@@ -19,6 +20,68 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+
+/* The following code is added by haoda le and netid hxl180046 
+**Random function. 
+**create a random number to pick the tickets for next running process
+*/
+static uint Q[4096], c = 362436;
+
+void srand(uint x)
+{
+  int i;
+
+  Q[0] = x;
+  Q[1] = x + PHI;
+  Q[2] = x + PHI + PHI;
+
+  for (i = 3; i < 4096; i++)
+    Q[i] = Q[i - 3] ^ Q[i - 2] ^ PHI ^ i;
+}
+
+uint rand(void)
+{
+  if(sizeof(unsigned long long) != 8){
+    return 0;
+  }
+  unsigned long long t, a = 18782LL;
+  static uint i = 4095;
+  uint x, r = 0xfffffffe;
+  i = (i + 1) & 4095;
+  t = a * Q[i] + c;
+  c = (t >> 32);
+  x = t + c;
+  if (x < c) {
+    x++;
+    c++;
+  }
+  return (Q[i] = r - x);
+}
+/* End of code added*/
+
+// Binary Search for upper bound
+int bin_search(int * arr, int value, int low, int high)
+{
+   int mid = -1;
+   while (low <= high)
+   {
+	mid = (low+high)/2;
+        if (arr[mid] == value)
+	{
+	    return mid;
+        }
+	else if (arr[mid] < value)
+	{
+	    low = mid + 1;
+	}
+	else {
+	    high = mid - 1;
+	}
+   }
+   return mid;
+}
+
 
 void
 pinit(void)
@@ -49,7 +112,11 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
+  p->is_traced = 0;
+  p->syscall_count = 0;
+  p->context_switch_count = 0;
+  p->scheduled_count = 0;
+  p->ticket_count = 10;
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -73,6 +140,8 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  
+
   return p;
 }
 
@@ -85,7 +154,7 @@ userinit(void)
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
   p = allocproc();
-  
+  p->ticket_count = 10;
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -117,7 +186,7 @@ userinit(void)
 // Grow current process's memory by n bytes.
 // Return 0 on success, -1 on failure.
 int
-growproc(int n)
+old_growproc(int n)
 {
   uint sz;
 
@@ -130,6 +199,17 @@ growproc(int n)
       return -1;
   }
   proc->sz = sz;
+  switchuvm(proc);
+  return 0;
+}
+//new growproc
+int
+growproc(int n)
+{
+  uint sz;
+
+  sz = proc->sz;
+  proc->sz = sz+n;
   switchuvm(proc);
   return 0;
 }
@@ -157,6 +237,7 @@ fork(void)
   }
   np->sz = proc->sz;
   np->parent = proc;
+  np->ticket_count = proc->ticket_count;
   *np->tf = *proc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
@@ -225,6 +306,26 @@ exit(void)
   panic("zombie exit");
 }
 
+void
+count_processes(struct processes_info *pi)
+{
+  struct proc *p;
+  int num_process = 0;
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state != UNUSED) 
+      {
+	//cprintf("found non-unused process\n");
+	pi->pids[num_process] = p->pid;
+        pi->ticks[num_process] = p->scheduled_count;
+	pi->tickets[num_process++] = p->ticket_count;
+      }
+  }
+  pi->num_processes = num_process;
+  release(&ptable.lock);
+}
+
+
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
@@ -277,7 +378,7 @@ wait(void)
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
 void
-scheduler(void)
+old_scheduler(void)
 {
   struct proc *p;
 
@@ -297,6 +398,7 @@ scheduler(void)
       proc = p;
       switchuvm(p);
       p->state = RUNNING;
+      p->scheduled_count++;
       swtch(&cpu->scheduler, p->context);
       switchkvm();
 
@@ -308,6 +410,77 @@ scheduler(void)
 
   }
 }
+//new scheduler -> lottery ticket scheduling
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct processes_info *pi;
+  struct processes_info obj_pi = {};
+  pi = &obj_pi;
+  int total_tickets, i, count;
+  //int idx;
+  //unsigned int * rand_arg;
+  long randval = 0;
+
+  static int have_seeded = 0;
+  const int seed = 1323;
+  if(!have_seeded)
+  {
+      srand(seed);
+      have_seeded = 1;
+  }
+  /* End of code added */
+  //rand_arg = (unsigned int *) kalloc();
+  //cprintf("before infinite loop\n");
+  for(;;){
+    // Enable interrupts on this processor.
+    sti();
+    //pi = (struct processes_info *) kalloc();
+    count_processes(pi);
+    total_tickets = pi->tickets[0];
+    count = 0;
+    //cprintf("before num_processes loop, num processes: %d\n", pi->num_processes);
+    for (i = 1; i < pi->num_processes; i++)
+    {
+        pi->tickets[i] += pi->tickets[i-1];
+	total_tickets = pi->tickets[i];
+    }
+    //cprintf("after num_processes loop, total tickets: %d\n", total_tickets);
+    if (total_tickets) randval = (rand()%total_tickets) + 1;
+    //idx = bin_search(pi->tickets, randval,0, pi->num_processes-1);
+    // Loop over process table looking for process to run.
+    acquire(&ptable.lock);
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state != RUNNABLE)
+        continue;
+      if (count + p->ticket_count < randval)
+      {
+        count += p->ticket_count; 
+        continue;
+      }
+      // Switch to chosen process.  It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      else { 
+	      proc = p;
+	      switchuvm(p);
+	      p->state = RUNNING;
+	      p->scheduled_count++;
+	      swtch(&cpu->scheduler, p->context);
+	      switchkvm();
+
+	      // Process is done running for now.
+	      // It should have changed its p->state before coming back.
+	      proc = 0;
+              break;
+      }
+    }
+    release(&ptable.lock);
+
+  }
+}
+
 
 // Enter scheduler.  Must hold only ptable.lock
 // and have changed proc->state. Saves and restores
@@ -330,6 +503,7 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = cpu->intena;
+  proc->context_switch_count++;
   swtch(&proc->context, cpu->scheduler);
   cpu->intena = intena;
 }
@@ -483,3 +657,21 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+//return process with given pid
+struct proc *
+getProcByPid(int pid)
+{
+  struct proc *p;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+       release(&ptable.lock);
+       return p;
+    }
+  }
+  release(&ptable.lock);
+  return 0;
+}
+

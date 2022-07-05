@@ -14,6 +14,36 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+int
+alloc_page(uint addr)
+{
+  char *mem;
+  uint a;
+
+  if(addr >= KERNBASE)
+    return 0;
+  if(addr > proc->sz)
+    return 0;
+
+  a = PGROUNDDOWN(addr);
+  
+  mem = kalloc();
+  if(mem == 0){
+     cprintf("alloc_page out of memory\n");
+     
+     return 0;
+  }
+  memset(mem, 0, PGSIZE);
+  if(mappages(proc->pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
+      cprintf("alloc_page out of memory (2)\n");
+      //deallocuvm(pgdir, newsz, oldsz);
+      kfree(mem);
+      return 0;
+  }
+  return 1;
+}
+
+
 void
 tvinit(void)
 {
@@ -76,6 +106,16 @@ trap(struct trapframe *tf)
     cprintf("cpu%d: spurious interrupt at %x:%x\n",
             cpunum(), tf->cs, tf->eip);
     lapiceoi();
+    break;
+  case T_PGFLT:
+    cprintf("Page fault occurred.\n");
+    cprintf("rcr2 = %d\n", rcr2());
+    pte_t * pt_entry = walkpgdir(proc->pgdir, PGROUNDDOWN(rcr2()),0);
+    if (pt_entry && !(*pt_entry & PTE_W) && (*pt_entry & PTE_P))
+    {
+	char* mem = kalloc();
+    }  
+    if (!alloc_page(rcr2())) panic("trap");
     break;
 
   //PAGEBREAK: 13
