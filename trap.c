@@ -43,6 +43,81 @@ alloc_page(uint addr)
   return 1;
 }
 
+void copyOnWrite()
+{ 
+
+   uint va = rcr2();       // get va
+
+  //errors taken care of
+  if(proc == 0)     // null process
+  { 
+      cprintf("Error in copyOnWrite: No user process for cr2=0x%x\n", va);
+      panic("PageFault");
+  }
+
+  pte_t *pte;
+
+  pte = walkpgdir(proc->pgdir, (void*)va, 0);
+
+  // page has write perm_S enabled
+  if(PTE_W & *pte)
+  {
+      cprintf("addr 0x%x\n already writeable", va);
+      
+      panic("Error in COW_handle_pgfault: Already writeable");
+  }
+
+  if( pte == 0  || !(*pte) || va >= KERNBASE || !PTE_U || ! PTE_P )
+  { 
+      proc->killed = 1;
+      cprintf("Error in COW_handle_pgfault: Illegal (virtual) addr at address 0x%x, killing proc %s id (pid) %d\n", va, proc->name, proc->pid);
+
+      return;
+  }
+
+  uint pa = PTE_ADDR(*pte);                     
+  uint refcount = get_refcount(pa);                
+
+  if(refcount < 1)
+  {
+      panic("Error in copyOnWrite: Invalid Reference Count");
+  }
+
+  else if(refcount == 1)
+  {
+      *pte = PTE_W | *pte;   
+      lcr3(V2P(proc->pgdir));
+      return;
+  }
+
+  else                      
+  {
+
+      char* mem = kalloc();
+
+      if(mem != 0)  
+      {   
+        memmove(mem, (char*)P2V(pa), PGSIZE);
+
+        *pte =  PTE_U | PTE_W | PTE_P | V2P(mem);
+
+        decrement_refcount(pa);
+
+        lcr3(V2P(proc->pgdir));
+        return;
+      }
+
+      proc->killed = 1;
+
+      cprintf("Error in copyOnWrite: Out of memory, kill proc %s with pid %d\n", proc->name, proc->pid);          
+      return;
+
+  }
+
+   
+  lcr3(V2P(proc->pgdir));
+}
+
 
 void
 tvinit(void)
@@ -110,12 +185,12 @@ trap(struct trapframe *tf)
   case T_PGFLT:
     cprintf("Page fault occurred.\n");
     cprintf("rcr2 = %d\n", rcr2());
-    pte_t * pt_entry = walkpgdir(proc->pgdir, PGROUNDDOWN(rcr2()),0);
+    pte_t * pt_entry = walkpgdir(proc->pgdir, (void *) PGROUNDDOWN(rcr2()),0);
     if (pt_entry && !(*pt_entry & PTE_W) && (*pt_entry & PTE_P))
     {
-	char* mem = kalloc();
+	copyOnWrite();
     }  
-    if (!alloc_page(rcr2())) panic("trap");
+    else if (!alloc_page(rcr2())) panic("trap");
     break;
 
   //PAGEBREAK: 13

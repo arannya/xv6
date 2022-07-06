@@ -352,7 +352,7 @@ copyuvm(pde_t *pgdir, uint sz)
   pde_t *d;
   pte_t *pte;
   uint pa, i, flags;
-  char *mem;
+  //char *mem;
 
   if((d = setupkvm()) == 0)
     return 0;
@@ -372,10 +372,14 @@ copyuvm(pde_t *pgdir, uint sz)
     //memmove(mem, (char*)P2V(pa), PGSIZE);
     if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0)
       goto bad;
+    increment_refcount(pa);
   }
+
+  lcr3(V2P(pgdir));
   return d;
 
 bad:
+  lcr3(V2P(pgdir));
   freevm(d);
   return 0;
 }

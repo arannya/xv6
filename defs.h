@@ -188,6 +188,11 @@ int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
 pte_t * walkpgdir(pde_t *pgdir, const void *va, int alloc);
 int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
+//Reference Counters
+void increment_refcount(uint pa);
+void decrement_refcount(uint pa);
+uint get_refcount(uint pa);
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
